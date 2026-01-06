@@ -205,9 +205,30 @@
         }
         .history-item:last-child { border-bottom: none; }
 
+        .h-left { flex: 1; }
+        .h-right { 
+            display: flex; 
+            align-items: center; 
+            gap: 15px; 
+        }
+
         .h-date { font-size: 0.75rem; color: #999; display: block; margin-bottom: 4px; }
         .h-details { font-size: 0.9rem; color: #444; }
         .h-cost { font-size: 1.1rem; font-weight: bold; color: var(--royal-blue); }
+
+        .btn-delete-single {
+            background: none;
+            border: none;
+            color: #dcdcdc;
+            font-weight: bold;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: color 0.2s;
+            padding: 0 5px;
+        }
+        .btn-delete-single:hover {
+            color: var(--danger);
+        }
 
         /* --- HISTORY ACTIONS --- */
         .btn-group { 
@@ -267,7 +288,7 @@
                 border-right: 1px solid #eee;
             }
             #history {
-                background: #fbfbfb; /* Very subtle grey for history side */
+                background: #fbfbfb;
             }
         }
     </style>
@@ -289,18 +310,19 @@
             <h3>1. Main Bill Details</h3>
             <div class="input-group">
                 <label>Total Bill Amount (PHP)</label>
-                <input type="number" id="mainBillAmount" placeholder="Total Amount to Pay" step="0.01" inputmode="decimal">
+                <input type="number" id="mainBillAmount" placeholder="0" step="0.01" inputmode="decimal">
             </div>
 
             <div class="input-group">
                 <label>Total Consumption (kWh)</label>
-                <input type="number" id="mainTotalKwh" placeholder="Total kWh Used" step="0.1" inputmode="decimal">
+                <input type="number" id="mainTotalKwh" placeholder="0" step="0.1" inputmode="decimal">
             </div>
 
             <!-- Step 2: User Meter Info -->
             <h3>2. My Meter Reading</h3>
             <div class="input-group">
                 <label>Previous Reading (kWh)</label>
+                <!-- This will auto-fill via JS if history exists -->
                 <input type="number" id="prevRead" placeholder="0" step="0.1" inputmode="decimal">
             </div>
 
@@ -353,7 +375,7 @@
                     <span>📥</span> Export CSV
                 </button>
                 <button class="btn-action clear" onclick="clearHistory()">
-                    <span>🗑️</span>
+                    <span>🗑️ Clear All</span>
                 </button>
             </div>
         </div>
@@ -363,11 +385,8 @@
         // --- 1. Startup Logic ---
         document.addEventListener("DOMContentLoaded", () => {
             loadHistory();
-            // Try to load previous MAIN bill inputs for convenience
-            const lastMainBill = localStorage.getItem('lastMainBill');
-            const lastMainKwh = localStorage.getItem('lastMainKwh');
-            if(lastMainBill) document.getElementById('mainBillAmount').value = lastMainBill;
-            if(lastMainKwh) document.getElementById('mainTotalKwh').value = lastMainKwh;
+            populatePreviousReading(); // Auto-fill Previous Reading from History
+            clearOtherFields(); // Ensure others are empty on refresh
 
             try {
                 localStorage.setItem('test', '1');
@@ -377,7 +396,28 @@
             }
         });
 
-        // --- 2. Tab Logic ---
+        function clearOtherFields() {
+            document.getElementById('mainBillAmount').value = '';
+            document.getElementById('mainTotalKwh').value = '';
+            document.getElementById('currRead').value = '';
+        }
+
+        // --- 2. Auto-Populate Logic (Previous Reading ONLY) ---
+        function populatePreviousReading() {
+            const history = getHistoryData();
+            const prevInput = document.getElementById('prevRead');
+            
+            if (history.length > 0) {
+                // If history exists, grab the 'Current' reading of the latest record
+                // and use it as the 'Previous' reading for the new session.
+                prevInput.value = history[0].curr;
+            } else {
+                // If no history, ensure it's empty (shows placeholder)
+                prevInput.value = ''; 
+            }
+        }
+
+        // --- 3. Tab Logic ---
         function switchTab(tabName) {
             document.querySelectorAll('.content').forEach(div => div.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -387,15 +427,18 @@
             document.querySelectorAll('.tab-btn')[btnIndex].classList.add('active');
         }
 
-        // --- 3. Calculation Logic ---
+        // --- 4. Calculation Logic ---
         function calculate() {
-            // Get Main Bill Inputs
-            const mainBill = parseFloat(document.getElementById('mainBillAmount').value);
-            const mainKwh = parseFloat(document.getElementById('mainTotalKwh').value);
+            // Get Inputs
+            const mainBillInput = document.getElementById('mainBillAmount');
+            const mainKwhInput = document.getElementById('mainTotalKwh');
+            const prevInput = document.getElementById('prevRead');
+            const currInput = document.getElementById('currRead');
 
-            // Get Meter Inputs
-            const prev = parseFloat(document.getElementById('prevRead').value);
-            const curr = parseFloat(document.getElementById('currRead').value);
+            const mainBill = parseFloat(mainBillInput.value);
+            const mainKwh = parseFloat(mainKwhInput.value);
+            const prev = parseFloat(prevInput.value);
+            const curr = parseFloat(currInput.value);
 
             // Validation
             if (isNaN(mainBill) || isNaN(mainKwh) || isNaN(prev) || isNaN(curr)) {
@@ -418,7 +461,7 @@
             const myKwhUsed = (curr - prev).toFixed(2);
             const myTotalCost = (myKwhUsed * computedRate);
 
-            // Update UI Results
+            // Display Results
             document.getElementById('display-prev').innerText = prev;
             document.getElementById('display-curr').innerText = curr;
             document.getElementById('res-kwh').innerText = `${myKwhUsed} kWh`;
@@ -426,19 +469,23 @@
             document.getElementById('res-total').innerText = formatPHP(myTotalCost);
             document.getElementById('result').style.display = 'block';
 
-            // Save for user convenience (Main bill inputs often stay similar)
-            localStorage.setItem('lastMainBill', mainBill);
-            localStorage.setItem('lastMainKwh', mainKwh);
-
-            // Save to History Log
+            // Save to History
             saveToHistory(prev, curr, myKwhUsed, myTotalCost, computedRate);
+
+            // --- CLEAN UP: Clear inputs but keep Previous Reading logic ---
+            mainBillInput.value = '';
+            mainKwhInput.value = '';
+            currInput.value = '';
+            
+            // Re-run populate to set Previous Reading to the value of "curr" we just submitted
+            populatePreviousReading();
         }
 
         function formatPHP(amount) {
             return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(amount);
         }
 
-        // --- 4. History Logic ---
+        // --- 5. History Logic ---
         function saveToHistory(prev, curr, kwh, total, rate) {
             const newItem = {
                 id: Date.now(),
@@ -446,7 +493,7 @@
                 prev: prev,
                 curr: curr,
                 kwh: kwh,
-                rate: rate.toFixed(4), // Store rate precisely
+                rate: rate.toFixed(4),
                 total: total
             };
 
@@ -462,6 +509,17 @@
         function getHistoryData() {
             const raw = localStorage.getItem('profHistory');
             return raw ? JSON.parse(raw) : [];
+        }
+
+        function deleteHistoryItem(id) {
+            if(!confirm("Delete this record?")) return;
+
+            let history = getHistoryData();
+            history = history.filter(item => item.id !== id);
+            
+            localStorage.setItem('profHistory', JSON.stringify(history));
+            loadHistory();
+            populatePreviousReading(); // Update previous reading based on new latest record
         }
 
         function loadHistory() {
@@ -486,19 +544,22 @@
                 const li = document.createElement('li');
                 li.className = 'history-item';
                 li.innerHTML = `
-                    <div>
+                    <div class="h-left">
                         <span class="h-date">${item.date}</span>
                         <div class="h-details">
                             ${item.prev} → <strong>${item.curr}</strong> (${item.kwh}kWh @ ${formattedRate})
                         </div>
                     </div>
-                    <div class="h-cost">${formatPHP(item.total)}</div>
+                    <div class="h-right">
+                        <div class="h-cost">${formatPHP(item.total)}</div>
+                        <button class="btn-delete-single" onclick="deleteHistoryItem(${item.id})" title="Delete Record">×</button>
+                    </div>
                 `;
                 list.appendChild(li);
             });
         }
 
-        // --- 5. Download & Clear ---
+        // --- 6. Download & Clear All ---
         function downloadHistory() {
             const history = getHistoryData();
             if (history.length === 0) return;
@@ -518,9 +579,10 @@
         }
 
         function clearHistory() {
-            if(confirm("Are you sure you want to clear the history logs?")) {
+            if(confirm("Are you sure you want to delete ALL history logs?")) {
                 localStorage.removeItem('profHistory');
                 loadHistory();
+                populatePreviousReading(); // This will clear the input since no history exists
             }
         }
     </script>
